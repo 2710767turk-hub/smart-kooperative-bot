@@ -4,7 +4,7 @@ import requests
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -34,7 +34,7 @@ def get_currency_rates():
     Возвращает:
     1 USD = X RUB
     1 EUR = Y RUB
-    1 KZT = Z RUB
+    1 RUB = Z KZT (обратный курс)
     Источник: openexchangerates.org
     """
     api_key = os.getenv("OPENEXCHANGE_API_KEY")
@@ -60,29 +60,32 @@ def get_currency_rates():
 
     # считаем EUR → RUB через USD
     eur_to_rub = usd_to_rub / usd_to_eur
-    # считаем KZT → RUB через USD
-    kzt_to_rub = usd_to_rub / usd_to_kzt
+    # считаем RUB → KZT (обратный курс: сколько тенге стоит 1 рубль)
+    rub_to_kzt = usd_to_kzt / usd_to_rub
 
-    return usd_to_rub, eur_to_rub, kzt_to_rub
+    return usd_to_rub, eur_to_rub, rub_to_kzt
 
 
 # ---------- ХЕНДЛЕРЫ ----------
 
 async def start_handler(message: Message):
-    await message.answer(
-        "Привет. Здесь вы можете получить актуальный курс валюты USD, EUR и KZT",
+    # Отправляем изображение
+    photo = FSInputFile("ChatGPT Image 22 янв. 2026 г., 16_23_08.png")
+    await message.answer_photo(
+        photo=photo,
+        caption="Привет. Здесь вы можете получить актуальный курс валюты USD, EUR и KZT",
         reply_markup=main_menu_kb()
     )
 
 
 async def get_rates_handler(callback: CallbackQuery):
-    usd_to_rub, eur_to_rub, kzt_to_rub = get_currency_rates()
+    usd_to_rub, eur_to_rub, rub_to_kzt = get_currency_rates()
 
     text = (
         "📈 Актуальный курс:\n\n"
         f"1 USD = {usd_to_rub:.2f} RUB\n"
         f"1 EUR = {eur_to_rub:.2f} RUB\n"
-        f"1 KZT = {kzt_to_rub:.4f} RUB"
+        f"1 RUB = {rub_to_kzt:.2f} KZT"
     )
 
     await callback.message.edit_text(
