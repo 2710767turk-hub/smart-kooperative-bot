@@ -69,30 +69,46 @@ def get_currency_rates():
 # ---------- ХЕНДЛЕРЫ ----------
 
 async def start_handler(message: Message):
-    # Отправляем изображение
+    # Отправляем изображение с автоматическим отображением
     photo = FSInputFile("ChatGPT Image 22 янв. 2026 г., 16_23_08.png")
     await message.answer_photo(
         photo=photo,
         caption="Привет. Здесь вы можете получить актуальный курс валюты USD, EUR и KZT",
-        reply_markup=main_menu_kb()
+        reply_markup=main_menu_kb(),
+        has_spoiler=False
     )
 
 
 async def get_rates_handler(callback: CallbackQuery):
-    usd_to_rub, eur_to_rub, rub_to_kzt = get_currency_rates()
+    try:
+        usd_to_rub, eur_to_rub, rub_to_kzt = get_currency_rates()
 
-    text = (
-        "📈 Актуальный курс:\n\n"
-        f"1 USD = {usd_to_rub:.2f} RUB\n"
-        f"1 EUR = {eur_to_rub:.2f} RUB\n"
-        f"1 RUB = {rub_to_kzt:.2f} KZT"
-    )
+        text = (
+            "📈 Актуальный курс:\n\n"
+            f"1 USD = {usd_to_rub:.2f} RUB\n"
+            f"1 EUR = {eur_to_rub:.2f} RUB\n"
+            f"1 RUB = {rub_to_kzt:.2f} KZT"
+        )
 
-    await callback.message.edit_text(
-        text,
-        reply_markup=back_to_menu_kb()
-    )
-    await callback.answer()
+        # Если сообщение - фото, отправляем новое текстовое сообщение
+        if callback.message.photo:
+            await callback.message.answer(
+                text,
+                reply_markup=back_to_menu_kb()
+            )
+        else:
+            # Если текстовое сообщение, редактируем его
+            await callback.message.edit_text(
+                text,
+                reply_markup=back_to_menu_kb()
+            )
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Ошибка при получении курса валют: {str(e)}",
+            reply_markup=back_to_menu_kb()
+        )
+    finally:
+        await callback.answer()
 
 
 async def back_to_menu_handler(callback: CallbackQuery):
