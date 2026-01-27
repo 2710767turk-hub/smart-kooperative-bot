@@ -53,29 +53,67 @@ class RateCache:
 
 rate_cache = RateCache()
 
+# Глобальные переменные для хранения рассчитанных курсов
+calculated_rates = {
+    'rub_to_kzt': None,
+    'kzt_to_rub': None
+}
+
 
 # ---------- КЛАВИАТУРЫ ----------
 
-def exchange_direction_kb():
-    """Клавиатура выбора направления обмена"""
+def request_rate_kb():
+    """Кнопка запроса курса"""
     kb = InlineKeyboardBuilder()
-    kb.button(text="RUB → KZT", callback_data="direction_rub_to_kzt")
-    kb.button(text="KZT → RUB", callback_data="direction_kzt_to_rub")
+    kb.button(text="Запросить курс", callback_data="request_rate")
+    return kb.as_markup()
+
+
+def rates_menu_kb():
+    """Меню после показа курсов"""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить курс", callback_data="request_rate")
+    kb.button(text="🧮 Калькулятор RUB ➡️ KZT", callback_data="calc_rub_to_kzt")
+    kb.button(text="🧮 Калькулятор KZT ➡️ RUB", callback_data="calc_kzt_to_rub")
     kb.adjust(1)  # По одной кнопке в ряд
     return kb.as_markup()
 
 
-def back_to_menu_kb():
-    """Кнопка возврата в главное меню"""
+def rub_to_kzt_calc_choice_kb():
+    """Выбор способа расчета для RUB → KZT"""
     kb = InlineKeyboardBuilder()
-    kb.button(text="⬅️ Возврат в главное меню", callback_data="back_to_menu")
+    kb.button(text="Введу сумму в рублях", callback_data="rub_to_kzt_input_rub")
+    kb.button(text="Введу сумму в тенге", callback_data="rub_to_kzt_input_kzt")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def kzt_to_rub_calc_choice_kb():
+    """Выбор способа расчета для KZT → RUB"""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Введу сумму в рублях", callback_data="kzt_to_rub_input_rub")
+    kb.button(text="Введу сумму в тенге", callback_data="kzt_to_rub_input_kzt")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def back_to_rates_kb():
+    """Кнопка возврата к курсам"""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить курс", callback_data="request_rate")
     return kb.as_markup()
 
 
 # ---------- СОСТОЯНИЯ FSM ----------
 
 class ExchangeStates(StatesGroup):
-    waiting_amount = State()
+    # Для RUB → KZT
+    rub_to_kzt_waiting_rub = State()  # Ожидаем сумму в рублях
+    rub_to_kzt_waiting_kzt = State()  # Ожидаем желаемую сумму в тенге
+    
+    # Для KZT → RUB
+    kzt_to_rub_waiting_kzt = State()  # Ожидаем сумму в тенге
+    kzt_to_rub_waiting_rub = State()  # Ожидаем желаемую сумму в рублях
 
 
 # ---------- API И РАСЧЕТЫ ----------
@@ -123,6 +161,9 @@ def calculate_rates() -> Tuple[float, float]:
     """
     Рассчитывает клиентские курсы обмена с учетом спреда 4%
     Возвращает: (rate_rub_to_kzt, rate_kzt_to_rub)
+    
+    RUB → KZT: вычитаем 4% (умножаем на 0.96)
+    KZT → RUB: прибавляем 4% (делим на курс и умножаем на 1.04, но по формуле из ТЗ: (1/base_rate) * 0.96)
     """
     rub_per_usd, kzt_per_usd = get_market_rates()
     
@@ -130,8 +171,16 @@ def calculate_rates() -> Tuple[float, float]:
     base_rate = kzt_per_usd / rub_per_usd
     
     # Клиентские курсы с учетом спреда -4% (клиент получает меньше)
-    rate_rub_to_kzt = base_rate * 0.96  # RUB → KZT
+    rate_rub_to_kzt = base_rate * 0.96  # RUB → KZT (вычитаем 4%)
+    
+    # KZT → RUB: обратный курс с учетом спреда
+    # По схеме "прибавляя 4%", но формула из ТЗ: (1 / base_rate) * 0.96
+    # Это означает, что при обмене KZT→RUB клиент тоже получает меньше на 4%
     rate_kzt_to_rub = (1 / base_rate) * 0.96  # KZT → RUB
+    
+    # Сохраняем в глобальные переменные
+    calculated_rates['rub_to_kzt'] = rate_rub_to_kzt
+    calculated_rates['kzt_to_rub'] = rate_kzt_to_rub
     
     return rate_rub_to_kzt, rate_kzt_to_rub
 
@@ -139,189 +188,256 @@ def calculate_rates() -> Tuple[float, float]:
 # ---------- ХЕНДЛЕРЫ ----------
 
 async def start_handler(message: Message):
-    """Обработчик команды /start"""
-    # Приветственное сообщение с изображением
-    photo = FSInputFile("ChatGPT Image 22 янв. 2026 г., 16_23_08.png")
-    await message.answer_photo(
-        photo=photo,
-        caption="Здравствуйте! 👋\n\n🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ или ТЕНГЕ на РУБЛИ.",
-        has_spoiler=False
+    """Обработчик команды /start - Блок 1"""
+    text = (
+        "Здравствуйте! 👋\n\n"
+        "🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ и обратно."
     )
     
-    # Показываем выбор направления обмена
-    await message.answer(
-        "Выберите направление обмена:",
-        reply_markup=exchange_direction_kb()
+    await message.answer(text)
+    
+    # Блок 2
+    text2 = (
+        "💹 Поскольку на бирже непрерывно меняется курс, мы обновляем его каждые 20 минут.\n\n"
+        "🛎️ Нажми чтоб запросить актуальный курс 👇"
     )
+    
+    await message.answer(text2, reply_markup=request_rate_kb())
 
 
-async def direction_rub_to_kzt_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработчик выбора направления RUB → KZT"""
+async def request_rate_handler(callback: CallbackQuery):
+    """Обработчик запроса курса - Блок 3"""
     try:
-        rate_rub_to_kzt, _ = calculate_rates()
+        await callback.answer("Запрашиваю актуальный курс...")
         
-        text = (
-            f"💰 Курс обмена: 1 RUB = {rate_rub_to_kzt:.4f} KZT\n\n"
-            "Введите сумму в рублях для обмена:"
+        # Блок 3: Запрос курса
+        rate_rub_to_kzt, rate_kzt_to_rub = calculate_rates()
+        
+        # Пример для 1000 рублей
+        example_rub = 1000
+        example_kzt_result = example_rub * rate_rub_to_kzt
+        
+        # Пример для 1000 тенге
+        example_kzt = 1000
+        example_rub_result = example_kzt * rate_kzt_to_rub
+        
+        # Блок 4: Курс RUB → KZT
+        text_rub_to_kzt = (
+            f"📈 Обменный курс РУБЛИ на ТЕНГЕ\n"
+            f"{rate_rub_to_kzt:.4f}\n\n"
+            f"🏧 Это значит что если вы меняете 1000 рублей, то получите на счёт {example_kzt_result:.2f} тенге"
         )
         
-        # Проверяем, что текст не пустой
-        if not text or not text.strip():
-            text = "💰 Курс обмена загружается...\n\nВведите сумму в рублях для обмена:"
-        
-        await callback.message.answer(
-            text,
-            reply_markup=back_to_menu_kb()
+        # Блок 5: Курс KZT → RUB
+        text_kzt_to_rub = (
+            f"📈 Обменный курс ТЕНГЕ на РУБЛИ\n"
+            f"{rate_kzt_to_rub:.4f}\n\n"
+            f"🏧 Это значит что если вы меняете 1000 тенге, то получите на счёт {example_rub_result:.2f} рублей"
         )
         
-        # Сохраняем направление обмена в состояние
-        await state.update_data(direction="rub_to_kzt", rate=rate_rub_to_kzt)
-        await state.set_state(ExchangeStates.waiting_amount)
+        await callback.message.answer(text_rub_to_kzt)
+        await callback.message.answer(text_kzt_to_rub, reply_markup=rates_menu_kb())
         
     except Exception as e:
         error_text = f"❌ Ошибка при получении курса: {str(e)}"
-        if not error_text.strip():
-            error_text = "❌ Ошибка при получении курса. Попробуйте позже."
-        await callback.message.answer(
-            error_text,
-            reply_markup=back_to_menu_kb()
-        )
-    finally:
-        await callback.answer()
+        await callback.message.answer(error_text, reply_markup=request_rate_kb())
 
 
-async def direction_kzt_to_rub_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработчик выбора направления KZT → RUB"""
+# ---------- КАЛЬКУЛЯТОР RUB → KZT ----------
+
+async def calc_rub_to_kzt_handler(callback: CallbackQuery):
+    """Обработчик выбора калькулятора RUB → KZT - Блок 8"""
+    text = (
+        "Вы можете указать сумму в РУБЛЯХ 🇷🇺, которую хотите обменять, либо введите сумму в ТЕНГЕ 🇰🇿, "
+        "которую вы хотите получить на Казахстанский счёт."
+    )
+    
+    await callback.message.answer(text, reply_markup=rub_to_kzt_calc_choice_kb())
+    await callback.answer()
+
+
+async def rub_to_kzt_input_rub_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выбора ввода суммы в рублях - Блок 12"""
+    await state.set_state(ExchangeStates.rub_to_kzt_waiting_rub)
+    await callback.message.answer("Введите сумму в рублях 👇")
+    await callback.answer()
+
+
+async def rub_to_kzt_input_kzt_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выбора ввода желаемой суммы в тенге - Блок 13"""
+    await state.set_state(ExchangeStates.rub_to_kzt_waiting_kzt)
+    text = (
+        "Введите сумму в ТЕНГЕ, которую вы хотите получить на казахстанский счёт, "
+        "а мы рассчитаем, сколько для этого Вам нужно рублей 👇"
+    )
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+async def rub_to_kzt_amount_rub_handler(message: Message, state: FSMContext):
+    """Обработчик ввода суммы в рублях - Блок 17 → Блок 19"""
     try:
-        _, rate_kzt_to_rub = calculate_rates()
-        
-        text = (
-            f"💰 Курс обмена: 1 KZT = {rate_kzt_to_rub:.4f} RUB\n\n"
-            "Введите сумму в тенге для обмена:"
-        )
-        
-        # Проверяем, что текст не пустой
-        if not text or not text.strip():
-            text = "💰 Курс обмена загружается...\n\nВведите сумму в тенге для обмена:"
-        
-        await callback.message.answer(
-            text,
-            reply_markup=back_to_menu_kb()
-        )
-        
-        # Сохраняем направление обмена в состояние
-        await state.update_data(direction="kzt_to_rub", rate=rate_kzt_to_rub)
-        await state.set_state(ExchangeStates.waiting_amount)
-        
-    except Exception as e:
-        error_text = f"❌ Ошибка при получении курса: {str(e)}"
-        if not error_text.strip():
-            error_text = "❌ Ошибка при получении курса. Попробуйте позже."
-        await callback.message.answer(
-            error_text,
-            reply_markup=back_to_menu_kb()
-        )
-    finally:
-        await callback.answer()
-
-
-async def amount_handler(message: Message, state: FSMContext):
-    """Обработчик ввода суммы"""
-    try:
-        # Проверяем, что текст не пустой
         if not message.text or not message.text.strip():
             await message.answer("❌ Пожалуйста, введите сумму числом:")
             return
         
-        # Пытаемся преобразовать введенный текст в число
-        amount = float(message.text.replace(',', '.').strip())
+        amount_rub = float(message.text.replace(',', '.').strip())
         
-        if amount <= 0:
+        if amount_rub <= 0:
             await message.answer("❌ Сумма должна быть больше нуля. Введите корректную сумму:")
             return
         
-        # Получаем данные из состояния
-        data = await state.get_data()
-        direction = data.get('direction')
-        rate = data.get('rate')
+        rate = calculated_rates.get('rub_to_kzt')
+        if not rate:
+            rate, _ = calculate_rates()
         
-        if not direction or not rate:
-            await message.answer("❌ Ошибка. Пожалуйста, начните заново с команды /start")
-            await state.clear()
-            return
+        result_kzt = amount_rub * rate
         
-        # Рассчитываем результат обмена
-        if direction == "rub_to_kzt":
-            result = amount * rate
-            currency_from = "RUB"
-            currency_to = "KZT"
-        else:  # kzt_to_rub
-            result = amount * rate
-            currency_from = "KZT"
-            currency_to = "RUB"
-        
-        # Формируем ответ
         text = (
-            f"📊 Расчет обмена:\n\n"
-            f"Отдаете: {amount:,.2f} {currency_from}\n"
-            f"Получаете: {result:,.2f} {currency_to}\n\n"
-            f"Курс: 1 {currency_from} = {rate:.4f} {currency_to}"
+            f"💰 Если вы отправите {amount_rub:,.2f} руб., то\n"
+            f"получите на Казахстанский счёт\n"
+            f"{result_kzt:,.2f} тенге"
         )
         
-        # Проверяем, что текст не пустой
-        if not text or not text.strip():
-            text = "📊 Расчет выполнен. Попробуйте еще раз."
-        
-        await message.answer(text, reply_markup=back_to_menu_kb())
+        await message.answer(text, reply_markup=back_to_rates_kb())
         await state.clear()
         
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное число (например: 1000 или 1000.50):")
     except Exception as e:
-        error_text = f"❌ Ошибка при расчете: {str(e)}"
-        if not error_text.strip():
-            error_text = "❌ Ошибка при расчете. Попробуйте позже."
-        await message.answer(error_text, reply_markup=back_to_menu_kb())
+        await message.answer(f"❌ Ошибка при расчете: {str(e)}", reply_markup=back_to_rates_kb())
         await state.clear()
 
 
-async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработчик возврата в главное меню"""
+async def rub_to_kzt_amount_kzt_handler(message: Message, state: FSMContext):
+    """Обработчик ввода желаемой суммы в тенге - Блок 18 → Блок 21"""
     try:
+        if not message.text or not message.text.strip():
+            await message.answer("❌ Пожалуйста, введите сумму числом:")
+            return
+        
+        desired_kzt = float(message.text.replace(',', '.').strip())
+        
+        if desired_kzt <= 0:
+            await message.answer("❌ Сумма должна быть больше нуля. Введите корректную сумму:")
+            return
+        
+        rate = calculated_rates.get('rub_to_kzt')
+        if not rate:
+            rate, _ = calculate_rates()
+        
+        required_rub = desired_kzt / rate
+        
+        text = (
+            f"📝 Вам нужно сделать перевод на сумму\n"
+            f"🇷🇺 {required_rub:,.2f} рублей, чтоб получить {desired_kzt:,.2f} тенге 🇰🇿 на счёт"
+        )
+        
+        await message.answer(text, reply_markup=back_to_rates_kb())
         await state.clear()
         
-        # Возврат в главное меню - отправляем приветствие и изображение
-        caption = "Здравствуйте! 👋\n\n🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ или ТЕНГЕ на РУБЛИ."
-        if not caption or not caption.strip():
-            caption = "Здравствуйте! Выберите направление обмена."
-        
-        photo = FSInputFile("ChatGPT Image 22 янв. 2026 г., 16_23_08.png")
-        await callback.message.answer_photo(
-            photo=photo,
-            caption=caption,
-            has_spoiler=False
-        )
-        
-        # Показываем выбор направления обмена
-        menu_text = "Выберите направление обмена:"
-        if not menu_text or not menu_text.strip():
-            menu_text = "Выберите направление:"
-        
-        await callback.message.answer(
-            menu_text,
-            reply_markup=exchange_direction_kb()
-        )
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число (например: 1000 или 1000.50):")
     except Exception as e:
-        # Если ошибка при отправке фото, отправляем текстовое сообщение
-        try:
-            await callback.message.answer(
-                "Здравствуйте! 👋\n\n🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ или ТЕНГЕ на РУБЛИ.\n\nВыберите направление обмена:",
-                reply_markup=exchange_direction_kb()
-            )
-        except:
-            pass
-    finally:
-        await callback.answer()
+        await message.answer(f"❌ Ошибка при расчете: {str(e)}", reply_markup=back_to_rates_kb())
+        await state.clear()
+
+
+# ---------- КАЛЬКУЛЯТОР KZT → RUB ----------
+
+async def calc_kzt_to_rub_handler(callback: CallbackQuery):
+    """Обработчик выбора калькулятора KZT → RUB - Блок 9"""
+    text = (
+        "💶 Вы можете указать сумму в ТЕНГЕ 🇰🇿, которую хотите обменять, либо введите сумму в РУБЛЯХ 🇷🇺, "
+        "которую вы хотите получить на карту РФ."
+    )
+    
+    await callback.message.answer(text, reply_markup=kzt_to_rub_calc_choice_kb())
+    await callback.answer()
+
+
+async def kzt_to_rub_input_rub_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выбора ввода желаемой суммы в рублях - Блок 15"""
+    await state.set_state(ExchangeStates.kzt_to_rub_waiting_rub)
+    text = "🇷🇺 Введите сумму в рублях, которую вы хотите получить 👇"
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+async def kzt_to_rub_input_kzt_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выбора ввода суммы в тенге - Блок 16"""
+    await state.set_state(ExchangeStates.kzt_to_rub_waiting_kzt)
+    text = "🇰🇿 Введите сумму в тенге, сколько вы хотите обменять на рубли 👇"
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+async def kzt_to_rub_amount_rub_handler(message: Message, state: FSMContext):
+    """Обработчик ввода желаемой суммы в рублях - Блок 23 → Блок 22"""
+    try:
+        if not message.text or not message.text.strip():
+            await message.answer("❌ Пожалуйста, введите сумму числом:")
+            return
+        
+        desired_rub = float(message.text.replace(',', '.').strip())
+        
+        if desired_rub <= 0:
+            await message.answer("❌ Сумма должна быть больше нуля. Введите корректную сумму:")
+            return
+        
+        rate = calculated_rates.get('kzt_to_rub')
+        if not rate:
+            _, rate = calculate_rates()
+        
+        required_kzt = desired_rub / rate
+        
+        text = (
+            f"💰 Вы должны перевести на Казахстанскую карту {required_kzt:,.2f} тенге 🇰🇿, "
+            f"чтоб получить {desired_rub:,.2f} рублей 🇷🇺"
+        )
+        
+        await message.answer(text, reply_markup=back_to_rates_kb())
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число (например: 1000 или 1000.50):")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при расчете: {str(e)}", reply_markup=back_to_rates_kb())
+        await state.clear()
+
+
+async def kzt_to_rub_amount_kzt_handler(message: Message, state: FSMContext):
+    """Обработчик ввода суммы в тенге - Блок 24 → Блок 25"""
+    try:
+        if not message.text or not message.text.strip():
+            await message.answer("❌ Пожалуйста, введите сумму числом:")
+            return
+        
+        amount_kzt = float(message.text.replace(',', '.').strip())
+        
+        if amount_kzt <= 0:
+            await message.answer("❌ Сумма должна быть больше нуля. Введите корректную сумму:")
+            return
+        
+        rate = calculated_rates.get('kzt_to_rub')
+        if not rate:
+            _, rate = calculate_rates()
+        
+        result_rub = amount_kzt * rate
+        
+        text = (
+            f"💰 Если вы переведете на Казахстанскую карту {amount_kzt:,.2f} тенге 🇰🇿, "
+            f"вы получите {result_rub:,.2f} рублей 🇷🇺 на счет в РФ"
+        )
+        
+        await message.answer(text, reply_markup=back_to_rates_kb())
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число (например: 1000 или 1000.50):")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при расчете: {str(e)}", reply_markup=back_to_rates_kb())
+        await state.clear()
 
 
 # ---------- ЗАПУСК ----------
@@ -336,23 +452,38 @@ async def main():
 
     # Регистрация хендлеров
     dp.message.register(start_handler, CommandStart())
-    dp.message.register(amount_handler, ExchangeStates.waiting_amount)
-    dp.callback_query.register(direction_rub_to_kzt_handler, F.data == "direction_rub_to_kzt")
-    dp.callback_query.register(direction_kzt_to_rub_handler, F.data == "direction_kzt_to_rub")
-    dp.callback_query.register(back_to_menu_handler, F.data == "back_to_menu")
+    
+    # Запрос курса
+    dp.callback_query.register(request_rate_handler, F.data == "request_rate")
+    
+    # Калькуляторы
+    dp.callback_query.register(calc_rub_to_kzt_handler, F.data == "calc_rub_to_kzt")
+    dp.callback_query.register(calc_kzt_to_rub_handler, F.data == "calc_kzt_to_rub")
+    
+    # Выбор способа ввода для RUB → KZT
+    dp.callback_query.register(rub_to_kzt_input_rub_handler, F.data == "rub_to_kzt_input_rub")
+    dp.callback_query.register(rub_to_kzt_input_kzt_handler, F.data == "rub_to_kzt_input_kzt")
+    
+    # Выбор способа ввода для KZT → RUB
+    dp.callback_query.register(kzt_to_rub_input_rub_handler, F.data == "kzt_to_rub_input_rub")
+    dp.callback_query.register(kzt_to_rub_input_kzt_handler, F.data == "kzt_to_rub_input_kzt")
+    
+    # Обработчики ввода сумм
+    dp.message.register(rub_to_kzt_amount_rub_handler, ExchangeStates.rub_to_kzt_waiting_rub)
+    dp.message.register(rub_to_kzt_amount_kzt_handler, ExchangeStates.rub_to_kzt_waiting_kzt)
+    dp.message.register(kzt_to_rub_amount_rub_handler, ExchangeStates.kzt_to_rub_waiting_rub)
+    dp.message.register(kzt_to_rub_amount_kzt_handler, ExchangeStates.kzt_to_rub_waiting_kzt)
 
     # Обработчик ошибок
     async def error_handler(update: Update, exception: Exception):
         """Глобальный обработчик ошибок"""
         logger.error(f"Ошибка: {exception}", exc_info=exception)
         
-        # Если это ошибка редактирования пустого сообщения
         error_str = str(exception).lower()
         if "no text in the message to edit" in error_str or "bad request: there is no text" in error_str:
             logger.warning("Попытка редактировать сообщение с пустым текстом - игнорируем")
-            return True  # Обработали ошибку
+            return True
         
-        # Для других ошибок можно добавить уведомление пользователю
         try:
             if update and update.message:
                 await update.message.answer(
@@ -366,7 +497,7 @@ async def main():
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения об ошибке: {e}")
         
-        return True  # Обработали ошибку
+        return True
     
     dp.errors.register(error_handler)
     
