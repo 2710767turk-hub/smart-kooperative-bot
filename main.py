@@ -1,17 +1,25 @@
 import asyncio
 import os
 import requests
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, Update
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -152,9 +160,17 @@ async def direction_rub_to_kzt_handler(callback: CallbackQuery, state: FSMContex
     try:
         rate_rub_to_kzt, _ = calculate_rates()
         
-        await callback.message.answer(
+        text = (
             f"💰 Курс обмена: 1 RUB = {rate_rub_to_kzt:.4f} KZT\n\n"
-            "Введите сумму в рублях для обмена:",
+            "Введите сумму в рублях для обмена:"
+        )
+        
+        # Проверяем, что текст не пустой
+        if not text or not text.strip():
+            text = "💰 Курс обмена загружается...\n\nВведите сумму в рублях для обмена:"
+        
+        await callback.message.answer(
+            text,
             reply_markup=back_to_menu_kb()
         )
         
@@ -163,8 +179,11 @@ async def direction_rub_to_kzt_handler(callback: CallbackQuery, state: FSMContex
         await state.set_state(ExchangeStates.waiting_amount)
         
     except Exception as e:
+        error_text = f"❌ Ошибка при получении курса: {str(e)}"
+        if not error_text.strip():
+            error_text = "❌ Ошибка при получении курса. Попробуйте позже."
         await callback.message.answer(
-            f"❌ Ошибка при получении курса: {str(e)}",
+            error_text,
             reply_markup=back_to_menu_kb()
         )
     finally:
@@ -176,9 +195,17 @@ async def direction_kzt_to_rub_handler(callback: CallbackQuery, state: FSMContex
     try:
         _, rate_kzt_to_rub = calculate_rates()
         
-        await callback.message.answer(
+        text = (
             f"💰 Курс обмена: 1 KZT = {rate_kzt_to_rub:.4f} RUB\n\n"
-            "Введите сумму в тенге для обмена:",
+            "Введите сумму в тенге для обмена:"
+        )
+        
+        # Проверяем, что текст не пустой
+        if not text or not text.strip():
+            text = "💰 Курс обмена загружается...\n\nВведите сумму в тенге для обмена:"
+        
+        await callback.message.answer(
+            text,
             reply_markup=back_to_menu_kb()
         )
         
@@ -187,8 +214,11 @@ async def direction_kzt_to_rub_handler(callback: CallbackQuery, state: FSMContex
         await state.set_state(ExchangeStates.waiting_amount)
         
     except Exception as e:
+        error_text = f"❌ Ошибка при получении курса: {str(e)}"
+        if not error_text.strip():
+            error_text = "❌ Ошибка при получении курса. Попробуйте позже."
         await callback.message.answer(
-            f"❌ Ошибка при получении курса: {str(e)}",
+            error_text,
             reply_markup=back_to_menu_kb()
         )
     finally:
@@ -198,6 +228,11 @@ async def direction_kzt_to_rub_handler(callback: CallbackQuery, state: FSMContex
 async def amount_handler(message: Message, state: FSMContext):
     """Обработчик ввода суммы"""
     try:
+        # Проверяем, что текст не пустой
+        if not message.text or not message.text.strip():
+            await message.answer("❌ Пожалуйста, введите сумму числом:")
+            return
+        
         # Пытаемся преобразовать введенный текст в число
         amount = float(message.text.replace(',', '.').strip())
         
@@ -233,34 +268,60 @@ async def amount_handler(message: Message, state: FSMContext):
             f"Курс: 1 {currency_from} = {rate:.4f} {currency_to}"
         )
         
+        # Проверяем, что текст не пустой
+        if not text or not text.strip():
+            text = "📊 Расчет выполнен. Попробуйте еще раз."
+        
         await message.answer(text, reply_markup=back_to_menu_kb())
         await state.clear()
         
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное число (например: 1000 или 1000.50):")
     except Exception as e:
-        await message.answer(f"❌ Ошибка при расчете: {str(e)}", reply_markup=back_to_menu_kb())
+        error_text = f"❌ Ошибка при расчете: {str(e)}"
+        if not error_text.strip():
+            error_text = "❌ Ошибка при расчете. Попробуйте позже."
+        await message.answer(error_text, reply_markup=back_to_menu_kb())
         await state.clear()
 
 
 async def back_to_menu_handler(callback: CallbackQuery, state: FSMContext):
     """Обработчик возврата в главное меню"""
-    await state.clear()
-    
-    # Возврат в главное меню - отправляем приветствие и изображение
-    photo = FSInputFile("ChatGPT Image 22 янв. 2026 г., 16_23_08.png")
-    await callback.message.answer_photo(
-        photo=photo,
-        caption="Здравствуйте! 👋\n\n🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ или ТЕНГЕ на РУБЛИ.",
-        has_spoiler=False
-    )
-    
-    # Показываем выбор направления обмена
-    await callback.message.answer(
-        "Выберите направление обмена:",
-        reply_markup=exchange_direction_kb()
-    )
-    await callback.answer()
+    try:
+        await state.clear()
+        
+        # Возврат в главное меню - отправляем приветствие и изображение
+        caption = "Здравствуйте! 👋\n\n🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ или ТЕНГЕ на РУБЛИ."
+        if not caption or not caption.strip():
+            caption = "Здравствуйте! Выберите направление обмена."
+        
+        photo = FSInputFile("ChatGPT Image 22 янв. 2026 г., 16_23_08.png")
+        await callback.message.answer_photo(
+            photo=photo,
+            caption=caption,
+            has_spoiler=False
+        )
+        
+        # Показываем выбор направления обмена
+        menu_text = "Выберите направление обмена:"
+        if not menu_text or not menu_text.strip():
+            menu_text = "Выберите направление:"
+        
+        await callback.message.answer(
+            menu_text,
+            reply_markup=exchange_direction_kb()
+        )
+    except Exception as e:
+        # Если ошибка при отправке фото, отправляем текстовое сообщение
+        try:
+            await callback.message.answer(
+                "Здравствуйте! 👋\n\n🏦 Здесь вы можете быстро совершить обмен РУБЛИ на ТЕНГЕ или ТЕНГЕ на РУБЛИ.\n\nВыберите направление обмена:",
+                reply_markup=exchange_direction_kb()
+            )
+        except:
+            pass
+    finally:
+        await callback.answer()
 
 
 # ---------- ЗАПУСК ----------
@@ -280,6 +341,35 @@ async def main():
     dp.callback_query.register(direction_kzt_to_rub_handler, F.data == "direction_kzt_to_rub")
     dp.callback_query.register(back_to_menu_handler, F.data == "back_to_menu")
 
+    # Обработчик ошибок
+    async def error_handler(update: Update, exception: Exception):
+        """Глобальный обработчик ошибок"""
+        logger.error(f"Ошибка: {exception}", exc_info=exception)
+        
+        # Если это ошибка редактирования пустого сообщения
+        error_str = str(exception).lower()
+        if "no text in the message to edit" in error_str or "bad request: there is no text" in error_str:
+            logger.warning("Попытка редактировать сообщение с пустым текстом - игнорируем")
+            return True  # Обработали ошибку
+        
+        # Для других ошибок можно добавить уведомление пользователю
+        try:
+            if update and update.message:
+                await update.message.answer(
+                    "❌ Произошла ошибка. Пожалуйста, попробуйте еще раз или используйте /start"
+                )
+            elif update and update.callback_query:
+                await update.callback_query.message.answer(
+                    "❌ Произошла ошибка. Пожалуйста, попробуйте еще раз или используйте /start"
+                )
+                await update.callback_query.answer()
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения об ошибке: {e}")
+        
+        return True  # Обработали ошибку
+    
+    dp.errors.register(error_handler)
+    
     await dp.start_polling(bot)
 
 
