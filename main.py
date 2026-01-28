@@ -389,7 +389,7 @@ async def kzt_to_rub_amount_rub_handler(message: Message, state: FSMContext):
         if not rate:
             _, rate = calculate_rates()
         
-        required_kzt = desired_rub / rate
+        required_kzt = desired_rub * rate
         
         text = (
             f"💰 Вы должны перевести на Казахстанскую карту <b>{int(round(required_kzt))}</b> тенге 🇰🇿, "
