@@ -73,8 +73,8 @@ def rates_menu_kb():
     """Меню после показа курсов"""
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить курс", callback_data="request_rate")
-    kb.button(text="🧮 Калькулятор RUB ➡️ KZT", callback_data="calc_rub_to_kzt")
-    kb.button(text="🧮 Калькулятор KZT ➡️ RUB", callback_data="calc_kzt_to_rub")
+    kb.button(text="💸 Калькулятор RUB ➡️ KZT", callback_data="calc_rub_to_kzt")
+    kb.button(text="💸 Калькулятор KZT ➡️ RUB", callback_data="calc_kzt_to_rub")
     kb.adjust(1)  # По одной кнопке в ряд
     return kb.as_markup()
 
@@ -224,19 +224,23 @@ async def request_rate_handler(callback: CallbackQuery):
         # Блок 4: Курс RUB → KZT
         text_rub_to_kzt = (
             f"📈 Обменный курс РУБЛИ на ТЕНГЕ\n"
-            f"{rate_rub_to_kzt:.4f}\n\n"
-            f"🏧 Это значит что если вы меняете 1000 рублей, то получите на счёт {example_kzt_result:.2f} тенге"
+            f"<b>{rate_rub_to_kzt:.2f}</b>\n\n"
+            f"🏧 Это значит что если вы меняете 1000 рублей, то получите на счёт <b>{int(round(example_kzt_result))}</b> тенге"
         )
         
         # Блок 5: Курс KZT → RUB
+        # Показываем курс в формате "1 KZT = X RUB", где X = 1 / rate_rub_to_kzt
+        # Это обратный курс от Блока 4, представленный в том же формате
+        rate_kzt_to_rub_display = 1 / rate_rub_to_kzt if rate_rub_to_kzt > 0 else 0
+        
         text_kzt_to_rub = (
             f"📈 Обменный курс ТЕНГЕ на РУБЛИ\n"
-            f"{rate_kzt_to_rub:.4f}\n\n"
-            f"🏧 Это значит что если вы меняете 1000 тенге, то получите на счёт {example_rub_result:.2f} рублей"
+            f"<b>{rate_kzt_to_rub_display:.2f}</b>\n\n"
+            f"🏧 Это значит что если вы меняете 1000 тенге, то получите на счёт <b>{int(round(example_rub_result))}</b> рублей ➡️"
         )
         
-        await callback.message.answer(text_rub_to_kzt)
-        await callback.message.answer(text_kzt_to_rub, reply_markup=rates_menu_kb())
+        await callback.message.answer(text_rub_to_kzt, parse_mode="HTML")
+        await callback.message.answer(text_kzt_to_rub, reply_markup=rates_menu_kb(), parse_mode="HTML")
         
     except Exception as e:
         error_text = f"❌ Ошибка при получении курса: {str(e)}"
@@ -294,12 +298,12 @@ async def rub_to_kzt_amount_rub_handler(message: Message, state: FSMContext):
         result_kzt = amount_rub * rate
         
         text = (
-            f"💰 Если вы отправите {amount_rub:,.2f} руб., то\n"
+            f"💰 Если вы отправите <b>{int(round(amount_rub))}</b> руб., то\n"
             f"получите на Казахстанский счёт\n"
-            f"{result_kzt:,.2f} тенге"
+            f"<b>{int(round(result_kzt))}</b> тенге"
         )
         
-        await message.answer(text, reply_markup=back_to_rates_kb())
+        await message.answer(text, reply_markup=back_to_rates_kb(), parse_mode="HTML")
         await state.clear()
         
     except ValueError:
@@ -330,10 +334,10 @@ async def rub_to_kzt_amount_kzt_handler(message: Message, state: FSMContext):
         
         text = (
             f"📝 Вам нужно сделать перевод на сумму\n"
-            f"🇷🇺 {required_rub:,.2f} рублей, чтоб получить {desired_kzt:,.2f} тенге 🇰🇿 на счёт"
+            f"🇷🇺 <b>{int(round(required_rub))}</b> рублей, чтоб получить <b>{int(round(desired_kzt))}</b> тенге 🇰🇿 на счёт"
         )
         
-        await message.answer(text, reply_markup=back_to_rates_kb())
+        await message.answer(text, reply_markup=back_to_rates_kb(), parse_mode="HTML")
         await state.clear()
         
     except ValueError:
@@ -392,11 +396,11 @@ async def kzt_to_rub_amount_rub_handler(message: Message, state: FSMContext):
         required_kzt = desired_rub / rate
         
         text = (
-            f"💰 Вы должны перевести на Казахстанскую карту {required_kzt:,.2f} тенге 🇰🇿, "
-            f"чтоб получить {desired_rub:,.2f} рублей 🇷🇺"
+            f"💰 Вы должны перевести на Казахстанскую карту <b>{int(round(required_kzt))}</b> тенге 🇰🇿, "
+            f"чтоб получить <b>{int(round(desired_rub))}</b> рублей 🇷🇺"
         )
         
-        await message.answer(text, reply_markup=back_to_rates_kb())
+        await message.answer(text, reply_markup=back_to_rates_kb(), parse_mode="HTML")
         await state.clear()
         
     except ValueError:
@@ -426,11 +430,11 @@ async def kzt_to_rub_amount_kzt_handler(message: Message, state: FSMContext):
         result_rub = amount_kzt * rate
         
         text = (
-            f"💰 Если вы переведете на Казахстанскую карту {amount_kzt:,.2f} тенге 🇰🇿, "
-            f"вы получите {result_rub:,.2f} рублей 🇷🇺 на счет в РФ"
+            f"💰 Если вы переведете на Казахстанскую карту <b>{int(round(amount_kzt))}</b> тенге 🇰🇿, "
+            f"вы получите <b>{int(round(result_rub))}</b> рублей 🇷🇺 на счет в РФ"
         )
         
-        await message.answer(text, reply_markup=back_to_rates_kb())
+        await message.answer(text, reply_markup=back_to_rates_kb(), parse_mode="HTML")
         await state.clear()
         
     except ValueError:
