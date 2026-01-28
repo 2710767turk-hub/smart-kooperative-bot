@@ -218,7 +218,7 @@ async def request_rate_handler(callback: CallbackQuery):
         
         # Пример для 1000 тенге
         example_kzt = 1000
-        example_rub_result = example_kzt * rate_kzt_to_rub
+        example_rub_result = example_kzt / rate_kzt_to_rub
         
         # Блок 4: Курс RUB → KZT
         text_rub_to_kzt = (
@@ -423,7 +423,7 @@ async def kzt_to_rub_amount_kzt_handler(message: Message, state: FSMContext):
         if not rate:
             _, rate = calculate_rates()
         
-        result_rub = amount_kzt * rate
+        result_rub = amount_kzt / rate
         
         text = (
             f"💰 Если вы переведете на Казахстанскую карту <b>{int(round(amount_kzt))}</b> тенге 🇰🇿, "
